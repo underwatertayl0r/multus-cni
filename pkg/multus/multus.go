@@ -83,10 +83,36 @@ func saveScratchNetConf(containerID, dataDir string, netconf []byte) error {
 
 func consumeScratchNetConf(containerID, dataDir string) ([]byte, string, error) {
 	logging.Debugf("consumeScratchNetConf: %s, %s", containerID, dataDir)
+
+	// Treat containerID as a single path component and ensure it cannot escape dataDir.
+	if containerID == "" || containerID == "." || containerID == ".." ||
+		strings.Contains(containerID, "/") || strings.Contains(containerID, "\\") {
+		return nil, "", fmt.Errorf("invalid containerID for scratch netconf: %q", containerID)
+	}
+
+	// Build the cache file path and ensure it resides within dataDir.
 	path := filepath.Join(dataDir, containerID)
 
-	b, err := os.ReadFile(path)
-	return b, path, err
+	absDataDir, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to resolve dataDir %q: %v", dataDir, err)
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to resolve cache file path %q: %v", path, err)
+	}
+
+	// Ensure absPath is within absDataDir.
+	absDataDirWithSep := absDataDir
+	if !strings.HasSuffix(absDataDirWithSep, string(os.PathSeparator)) {
+		absDataDirWithSep += string(os.PathSeparator)
+	}
+	if absPath != absDataDir && !strings.HasPrefix(absPath, absDataDirWithSep) {
+		return nil, "", fmt.Errorf("cache file path %q escapes data directory %q", absPath, absDataDir)
+	}
+
+	b, err := os.ReadFile(absPath)
+	return b, absPath, err
 }
 
 func getIfname(delegate *types.DelegateNetConf, argif string, idx int) string {
