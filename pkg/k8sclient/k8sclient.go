@@ -540,9 +540,24 @@ func getNetDelegate(client *ClientInfo, pod *v1.Pod, netname, confdir, namespace
 		} else {
 			// option4) if file path (absolute), then load it directly
 			if strings.HasSuffix(netname, ".conflist") {
-				confList, err := LoadChainedPluginsFromFile(netname)
+				// For file-based conflist references ensure the path stays within the configured confdir.
+				confdirAbs, err := filepath.Abs(confdir)
 				if err != nil {
-					return nil, resourceMap, logging.Errorf("error loading CNI conflist file %s: %v", netname, err)
+					return nil, resourceMap, logging.Errorf("error resolving confdir %s: %v", confdir, err)
+				}
+				candidatePath := filepath.Join(confdirAbs, netname)
+				cleanCandidate, err := filepath.Abs(filepath.Clean(candidatePath))
+				if err != nil {
+					return nil, resourceMap, logging.Errorf("error resolving conflist path %s: %v", candidatePath, err)
+				}
+				// Ensure the resulting path is still under confdirAbs.
+				if rel, err := filepath.Rel(confdirAbs, cleanCandidate); err != nil || strings.HasPrefix(rel, "..") || rel == "." && netname == "" {
+					return nil, resourceMap, logging.Errorf("invalid conflist path %s resolved to %s outside of confdir %s", netname, cleanCandidate, confdirAbs)
+				}
+
+				confList, err := LoadChainedPluginsFromFile(cleanCandidate)
+				if err != nil {
+					return nil, resourceMap, logging.Errorf("error loading CNI conflist file %s: %v", cleanCandidate, err)
 				}
 
 				delegate, err := types.LoadDelegateNetConfFromConfList(confList, nil, "", "")
@@ -556,12 +571,26 @@ func getNetDelegate(client *ClientInfo, pod *v1.Pod, netname, confdir, namespace
 			// Or it's not a conflist...
 			// after libcni v1.2.3 there's no support support this old-school method with non-conflists.
 			// this method doesn't check if there's a 0 length plugins field, that is.
-			conf, err := libcni.ConfFromFile(netname)
+			confdirAbs, err := filepath.Abs(confdir)
 			if err != nil {
-				return nil, resourceMap, logging.Errorf("error loading CNI config file %s: %v", netname, err)
+				return nil, resourceMap, logging.Errorf("error resolving confdir %s: %v", confdir, err)
+			candidatePath := filepath.Join(confdirAbs, netname)
+			cleanCandidate, err := filepath.Abs(filepath.Clean(candidatePath))
+			if err != nil {
+				return nil, resourceMap, logging.Errorf("error resolving CNI config path %s: %v", candidatePath, err)
+			}
+			// Ensure the resulting path is still under confdirAbs.
+			if rel, err := filepath.Rel(confdirAbs, cleanCandidate); err != nil || strings.HasPrefix(rel, "..") || rel == "." && netname == "" {
+				return nil, resourceMap, logging.Errorf("invalid CNI config path %s resolved to %s outside of confdir %s", netname, cleanCandidate, confdirAbs)
+			}
+
+			conf, err := libcni.ConfFromFile(cleanCandidate)
+			if err != nil {
+				return nil, resourceMap, logging.Errorf("error loading CNI config file %s: %v", cleanCandidate, err)
+			}
 			}
 			if conf.Network.Type == "" {
-				return nil, resourceMap, logging.Errorf("error loading CNI config file %s: no 'type'; perhaps this is supposed to be a .conflist?", netname)
+				return nil, resourceMap, logging.Errorf("error loading CNI config file %s: no 'type'; perhaps this is supposed to be a .conflist?", cleanCandidate)
 			}
 
 			delegate, err := types.LoadDelegateNetConf(conf.Bytes, nil, "", "")
@@ -621,6 +650,10 @@ func LoadChainedDelegatesFromBytes(bytes []byte, cniconfdir string) *types.Deleg
 		return nil
 	}
 
+	absPath, err := filepath.Abs(cleanPath)
+	if err != nil {
+		return nil, fmt.Errorf("error resolving CNI configuration path %s: %w", filename, err)
+	}
 	return delegate
 }
 
@@ -629,7 +662,7 @@ func LoadChainedPluginsFromFile(filename string) (*libcni.NetworkConfigList, err
 	cleanPath := filepath.Clean(filename)
 
 	// stat the file to make sure it's a normal file.
-	info, err := os.Stat(cleanPath)
+	info, err := os.Stat(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -638,13 +671,13 @@ func LoadChainedPluginsFromFile(filename string) (*libcni.NetworkConfigList, err
 		return nil, errors.New("CNI configuration path is not a regular file")
 	}
 
-	bytes, err := os.ReadFile(cleanPath)
+	bytes, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading %s: %w", filename, err)
+		return nil, fmt.Errorf("error reading %s: %w", absPath, err)
 	}
-	logging.Debugf("LoadChainedPluginsFromFile: %s", filename)
+	logging.Debugf("LoadChainedPluginsFromFile: %s", absPath)
 
-	conf, err := loadSubdirectoryChain(bytes, filepath.Dir(filename))
+	conf, err := loadSubdirectoryChain(bytes, filepath.Dir(absPath))
 	if err != nil {
 		return nil, err
 	}
