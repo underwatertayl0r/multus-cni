@@ -718,6 +718,14 @@ func CheckSystemNamespaces(namespace string, systemNamespaces []string) bool {
 
 // GetReadinessIndicatorFile waits for readinessIndicatorFile
 func GetReadinessIndicatorFile(readinessIndicatorFileRaw string) error {
+	// Ensure the readiness indicator file is a single path component (no directories or parent refs)
+	if readinessIndicatorFileRaw == "" ||
+		strings.Contains(readinessIndicatorFileRaw, "/") ||
+		strings.Contains(readinessIndicatorFileRaw, "\\") ||
+		strings.Contains(readinessIndicatorFileRaw, "..") {
+		return fmt.Errorf("invalid readinessIndicatorFile: must be a single filename without path separators or '..'")
+	}
+
 	cleanpath := filepath.Clean(readinessIndicatorFileRaw)
 	readinessIndicatorFile, err := filepath.Abs(cleanpath)
 	if err != nil {
@@ -734,6 +742,14 @@ func GetReadinessIndicatorFile(readinessIndicatorFileRaw string) error {
 
 // ReadinessIndicatorExistsNow reports if the readiness indicator exists immediately.
 func ReadinessIndicatorExistsNow(readinessIndicatorFileRaw string) (bool, error) {
+	// Ensure the readiness indicator file is a single path component (no directories or parent refs)
+	if readinessIndicatorFileRaw == "" ||
+		strings.Contains(readinessIndicatorFileRaw, "/") ||
+		strings.Contains(readinessIndicatorFileRaw, "\\") ||
+		strings.Contains(readinessIndicatorFileRaw, "..") {
+		return false, fmt.Errorf("invalid readinessIndicatorFile: must be a single filename without path separators or '..'")
+	}
+
 	cleanpath := filepath.Clean(readinessIndicatorFileRaw)
 	readinessIndicatorFile, err := filepath.Abs(cleanpath)
 	if err != nil {
